@@ -1,0 +1,8 @@
+<launch>
+
+  <node pkg="rqt_image_view" type="rqt_image_view" name="rqt_image_view" />
+ 
+  <node pkg="aruco_node" type="aruco_node" name="aruco_node" output='screen'>
+  </node>
+
+</launch>
