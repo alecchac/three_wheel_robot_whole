@@ -19,6 +19,7 @@
 using namespace std;
 using namespace cv;
 using namespace aruco;
+
 // Subscriber to camera
 ros::Subscriber sub;
 
@@ -27,13 +28,13 @@ image_transport::Publisher imagepub;
 
 ros::Publisher datapub;
 
-float pi = 3.14159265358979;
+const float PI = 3.14159265358979;
 
 namespace enc = sensor_msgs::image_encodings;
 
 // Mark info
-float MarkX, MarkY; // Mark center
-float lastMarkX, lastMarkY; // Last mark center
+// float MarkX, MarkY; // Mark center
+// float lastMarkX, lastMarkY; // Last mark center
 
 //Image center
 float ImageX, ImageY, D2Center;
@@ -49,7 +50,7 @@ CameraParameters CP;
 //     fs["image_width"] >> distCoeffs;
 //     return true;
 // }
-
+/*
 float linefitinch(float x)
 {
     float a,b;
@@ -57,30 +58,38 @@ float linefitinch(float x)
     b = 0;
     return a*x+b;
 }
-float getDistanceToMarker(Marker m)
+*/
+
+Mat getCameraVector(const Mat& Rvec,const Mat& Tvec)
 {
-    float distance = 0;
     Mat R(3, 3, CV_32F);
     Mat C(3, 3, CV_32F);
-    Rodrigues(m.Rvec,R);
-    C = -R.t()*m.Tvec;
-    distance = (float) norm(C);
-
-    return distance;
-}
-
-Mat getCameraVector(Marker m)
-{
-    Mat R(3, 3, CV_32F);
-    Mat C;
-    Rodrigues(m.Rvec,R);
-    C = -R.t()*m.Tvec;
+    //Rodrigues converts rvec to a 3x3 rotation matrix
+    Rodrigues(Rvec,R);
+    // gets the position matrix from the multiplication of transpose of rotation matrix and tvec (3x1)
+    C = -R.t()*Tvec;
     return C;
 }
+
+float getDistanceToMarker(const Mat& camVec)
+{
+    return sqrt(pow(camVec.at<double>(0,0),2)+pow(camVec.at<float>(2,0),2));
+}
+
+float getX(const Mat& camVec)
+{
+    return camVec.at<float>(2,0);
+}
+
+float getY(const Mat& camVec)
+{
+    return camVec.at<float>(0,0);
+}
+
 /*
 void drawCameraPose(float d, float theta)
 {
-    float pi = 3.14159265358979;
+    float PI = 3.14159265358979;
     float rcoord, ccoord;
     Mat D(480, 640, CV_8UC3, Scalar(0,0,0));
     Point centerPoint(320,240);
@@ -141,8 +150,8 @@ void dataPublisher(int markno, float d, float theta, float distCenter)
     geometry_msgs::Pose2D robot_pose;
     float d_t = d*.2/12;
 
-    robot_pose.x = -d_t*cos(theta-pi/2);
-    robot_pose.y = d_t*sin(theta-pi/2);
+    robot_pose.x = -d_t*cos(theta-PI/2);
+    robot_pose.y = d_t*sin(theta-PI/2);
 
     if (distCenter > 100)
         distCenter = 1;
@@ -163,25 +172,15 @@ void dataPublisher(int markno, float d, float theta, float distCenter)
 }
 */
 
-void dataPublisher(int markno, float d, float theta, float distCenter)
+void dataPublisher(int markno, const float& x, const float& y, const float& theta)
 {
     aruco_node::measurement robot_pose;
-
     robot_pose.markernum = markno;
+    robot_pose.x = x;
+    robot_pose.y = y;
+    robot_pose.theta = theta + PI;
 
-    robot_pose.x = d*cos(theta);
-    robot_pose.y = d*sin(theta);
-
-    if (distCenter > 100)
-        distCenter = 1;
-    else if (distCenter < -100)
-        distCenter = -1;
-    else
-        distCenter = 0;
-
-    robot_pose.theta = theta;
-
-    if (markno == 0 && d  == 0 && theta  == 0 && distCenter == 0)
+    if (markno == 0 && x  == 0 && y  == 0)
     robot_pose.isValid=false;
     else
     robot_pose.isValid=true;
@@ -202,11 +201,11 @@ void imageCallback(const  sensor_msgs::CompressedImageConstPtr& msg)
 
     // float distData[1][5] = {0.116661, -0.209662, -0.002704, 0.000408, 0.000000};
     //picam
-    float camData[3][3] = {{1256.178358, 0.000000, 629.469338}, \
-                           {0.000000, 1245.048610, 456.420505}, \
+    float camData[3][3] = {{636.454710, 0.000000, 307.448628}, \
+                           {0.000000, 630.950383, 235.297077}, \
                            {0.000000, 0.000000, 1.000000}};
 
-    float distData[1][5] = {-0.026946, -0.080131, -0.002995, 0.001467, 0.000000};
+    float distData[1][5] = {-0.006626, -0.123577, -0.001085, 0.000374, 0.000000};
 
     camMatrix = Mat(3, 3, CV_32FC1, camData);
     distCoeffs = Mat(1, 5, CV_32FC1, distData);
@@ -214,39 +213,45 @@ void imageCallback(const  sensor_msgs::CompressedImageConstPtr& msg)
     CP.setParams(camMatrix,distCoeffs,cv::Size(-1, -1));
 
     MarkerDetector MDetector;
+    MarkerPoseTracker MTracker;
     vector<Marker> Markers;
     cv_bridge::CvImagePtr cv_ptr;
 
     cv_ptr = cv_bridge::toCvCopy(msg, enc::BGR8);
 
-    MDetector.detect(cv_ptr->image, Markers, CP.CameraMatrix, CP.Distorsion, .14); //.053
-
     float MarkDistances[Markers.size()];
     float MarkDistancesInch[Markers.size()];
     float MarkAngles[Markers.size()];
+    float MarkerSize = .14;
+    bool isTracking;
+
+    MDetector.detect(cv_ptr->image, Markers, CP.CameraMatrix, CP.Distorsion, MarkerSize); //.053
+
+
     for (unsigned int i = 0; i<Markers.size(); i++)
     {
         if (Markers[i].id == 224)
         {
             Markers[i].draw(cv_ptr->image,Scalar(0,0,255),2);
             draw3dAxis(cv_ptr->image, Markers[i], CP, .3);
-            MarkDistances[i] = getDistanceToMarker(Markers[i]);
-            MarkDistancesInch[i] = linefitinch(MarkDistances[i]);
-
+            isTracking = MTracker.estimatePose(Markers[i],CP,MarkerSize,1);
 
             Mat C;
-
-            C = getCameraVector(Markers[i]);
-            MarkAngles[i] = atan2(C.at<float>(1,0),C.at<float>(2,0));
+            C = getCameraVector(MTracker.getRvec(),MTracker.getTvec());
+            MarkDistances[i] = getDistanceToMarker(C);
+            //C (x,y,z) vector
+            MarkAngles[i] = atan2(C.at<float>(0,0),C.at<float>(2,0)); //atan2(x,z)
+            //MarkAngles[i] = Markers[i].Rvec[0][2];
             cout << fixed;
-            cout << setprecision(2);
-            cout << "Marker Pose | Distance: " << MarkDistancesInch[i] << " inches | " \
-                 << "Angle: " << MarkAngles[i]*180/3.1415 << " degrees \n"<< D2Center << " Dist \n";
+            cout << setprecision(4);
+            cout << "Marker Pose | Distance: " << MarkDistances[i] << " meters? | " \
+                 << "Angle: " << MarkAngles[i]*180/3.1415 << " degrees \n"<< getX(C) << " x \n" \
+                 << getY(C) << " y \n";
             //drawCameraPose(MarkDistances[i],MarkAngles[i]);
             ImageX = cv_ptr->image.cols/2;
             D2Center = Markers[i].getCenter().x - ImageX;
 
-            dataPublisher(i, MarkDistancesInch[i], MarkAngles[i], D2Center);
+            dataPublisher(i, getX(C), getY(C),MarkAngles[i]);
         }
 
     }
@@ -268,7 +273,7 @@ int main(int argc, char **argv)
     ros::NodeHandle nh;
     image_transport::ImageTransport it(nh);
     sub = nh.subscribe("/raspicam_node/image/compressed", 1, imageCallback);
-    imagepub = it.advertise("/camera/image_processed", 10);
+    imagepub = it.advertise("/camera/image_processed", 1);
     //drawpub = it.advertise("/camera/drawing", 10);
     datapub = nh.advertise<aruco_node::measurement>("/aruco/robot_pose",1);
     ros::spin();
