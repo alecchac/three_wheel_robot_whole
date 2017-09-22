@@ -172,13 +172,14 @@ void dataPublisher(int markno, float d, float theta, float distCenter)
 }
 */
 
-void dataPublisher(int markno, const float& x, const float& y, const float& theta)
+void dataPublisher(int markno, const float& x, const float& y, const float& theta, const float& D2C)
 {
     aruco_node::measurement robot_pose;
     robot_pose.markernum = markno;
     robot_pose.x = x;
     robot_pose.y = y;
     robot_pose.theta = theta + PI;
+    robot_pose.D2C = D2C;
 
     if (markno == 0 && x  == 0 && y  == 0)
     robot_pose.isValid=false;
@@ -251,13 +252,13 @@ void imageCallback(const  sensor_msgs::CompressedImageConstPtr& msg)
             ImageX = cv_ptr->image.cols/2;
             D2Center = Markers[i].getCenter().x - ImageX;
 
-            dataPublisher(i, getX(C), getY(C),MarkAngles[i]);
+            dataPublisher(i, getX(C), getY(C),MarkAngles[i],D2Center);
         }
 
     }
     if (Markers.size() == 0) 
     {
-        dataPublisher(0, 0, 0, 0);
+        dataPublisher(0, 0, 0, 0, 0);
     }
 
 
